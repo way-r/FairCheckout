@@ -1,2 +1,3 @@
-# Anti-Scalping-Payment-Interceptor
-A custom proxy layer to block transactions from suspected scalpers
+# FairCheckout
+## Overview
+Faircheckout is an open source API gateway that acts as an interceptor layer between a merchant's checkout system and their payment processor. Its primary goal is to prevent automated bot networks and scalpers from monopolizing limited inventory during high-demand releases. Faircheckout detects and blocks payment attempts with "jigged" and duplicated shipping information to guarantee that only unqiue and legitmate transactions are forwarded to the payment processor, ensuring fair access for real human customers while protecting merchant inventory. 

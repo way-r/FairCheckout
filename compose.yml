@@ -1,0 +1,14 @@
+services:
+  redis-cluster:
+    container_name: redis-cluster
+    image: grokzen/redis-cluster:6.2.14
+    ports:
+    - "6000:6000"
+    - "6001:6001"
+    - "6002:6002"
+    - "6003:6003"
+    - "6004:6004"
+    - "6005:6005"
+    environment:
+      - IP=0.0.0.0
+      - INITIAL_PORT=6000

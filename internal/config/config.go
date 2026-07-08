@@ -13,7 +13,7 @@ type AppConfig struct {
 	RedisClusterAddrs []string
 }
 
-// load config from local env file
+// Load config from local env file
 func LoadConfigEnv() *AppConfig {
 	logger.InitLogger()
 	err := godotenv.Load()

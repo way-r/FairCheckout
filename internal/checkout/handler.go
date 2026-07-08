@@ -19,13 +19,6 @@ type CheckoutRequest struct {
 	IdempotencyKey string `json:"idempotency_key" binding:"required"`
 }
 
-type CheckoutAddress struct {
-	StreetAddress string
-	State         string
-	City          string
-	ZipCode       string
-}
-
 type CheckoutHandler struct {
 	ChekoutService CheckoutService
 }
@@ -33,18 +26,16 @@ type CheckoutHandler struct {
 func (chdl *CheckoutHandler) Checkout(gctx *gin.Context) {
 	var checkoutRequest CheckoutRequest
 	if err := gctx.ShouldBindJSON(&checkoutRequest); err != nil {
-		gctx.JSON(400, gin.H{"error": err.Error()})
+		gctx.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
 
 	ctx := gctx.Request.Context()
-	checkoutAddress := &CheckoutAddress{
-		StreetAddress: checkoutRequest.Address1,
-		State:         checkoutRequest.State,
-		City:          checkoutRequest.City,
-		ZipCode:       checkoutRequest.ZipCode,
-	}
-	chdl.ChekoutService.ProcessCheckout(ctx, *checkoutAddress)
+	checkoutResult := chdl.ChekoutService.ProcessCheckout(ctx, checkoutRequest.ZipCode, checkoutRequest.Address1, checkoutRequest.City, checkoutRequest.State)
 
-	gctx.JSON(http.StatusOK, gin.H{"status": "accepted"})
+	gctx.JSON(http.StatusAccepted, gin.H{
+		"order_status": checkoutResult.EventId.String(),
+	})
 }

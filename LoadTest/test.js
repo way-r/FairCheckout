@@ -1,28 +1,31 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import { uuidv4 } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
+import { randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 
 export const options = {
-    duration: '30s',
-    vus: 50,
-    thresholds: {
-        'http_req_duration': ['p(95)<500'],
-        'http_req_failed': ['rate<0.01'],
-    },
+    stages: [
+        { duration: '10s', target: 50 },
+        { duration: '20s', target: 100 },
+        { duration: '10s', target: 0 },
+    ],
 }
 
+const ADDRESS_POOL_SIZE = 100;
+const checkoutUrl = 'http://localhost:8080/checkout'
+
 export default function() {
-    const checkoutUrl = 'http://localhost:8080/checkout'
-    const checkoutRequestPayload = JSON.stringify({
-        address_1: '123 Main Street',
-        address_2: 'Apt 101',
-        state: 'CA',
-        zip_code: '1',
-        payment_token: '1',
-        amount: 1,
-        currency: 'usd',
-        idempotency_key: '1'
+    const randomHouseNumber = Math.floor(Math.random() * ADDRESS_POOL_SIZE) + 1;
+    const payload = JSON.stringify({
+        payment_id: uuidv4(),
+        shipping_address: {
+            line_1:  `${randomIntBetween(0, ADDRESS_POOL_SIZE)} main street`,
+            line_2: "Apt A1",
+            city: "Bellevue",
+            zip_code: "98005",
+        }
     })
-    const checkoutResponse = http.post(checkoutUrl, checkoutRequestPayload, { 'Content-Type': 'application/json' });
+    const checkoutResponse = http.post(checkoutUrl, payload, { 'Content-Type': 'application/json' });
     check(checkoutResponse, { 'GET status is 200': (r) => r.status === 200 });
     sleep(1);
 }

@@ -11,7 +11,7 @@ import (
 
 func main() {
 	logger.InitLogger()
-	appConfig := config.LoadConfigEnv()
+	appConfig := config.LoadConfigLocal()
 
 	redisClusterClient := datastore.RedisClusterClient(appConfig)
 	checkoutService := &checkout.CheckoutService{

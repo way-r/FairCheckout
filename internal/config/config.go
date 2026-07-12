@@ -14,7 +14,7 @@ type AppConfig struct {
 }
 
 // Load config from local env file
-func LoadConfigEnv() *AppConfig {
+func LoadConfigLocal() *AppConfig {
 	logger.InitLogger()
 	err := godotenv.Load()
 	if err != nil {

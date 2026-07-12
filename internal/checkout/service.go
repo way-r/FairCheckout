@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	status "FairCheckout/internal/domain"
+	domain "FairCheckout/internal/domain"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -18,63 +18,60 @@ type CheckoutService struct {
 }
 
 type CheckoutResult struct {
-	EventId status.EventId
+	EventId domain.EventId
 }
 
-var ErrLockBusy = errors.New("Lock is currently held by another transaction")
-var ErrDupOrder = errors.New("An order has been made to the address")
-
-func (cs *CheckoutService) ProcessCheckout(ctx context.Context, zipCode string, streetAddress string, city string, state string) CheckoutResult {
+func (cs *CheckoutService) ProcessCheckout(ctx context.Context, paymentId string, shippingAddress domain.ShippingAddress) CheckoutResult {
 	// lock the attempt key
-	baseKey := fmt.Sprintf(":{%s}%s_%s_%s", zipCode, streetAddress, city, state)
+	baseKey := shippingAddress.BaseKey()
 	attemptKey := fmt.Sprintf("attempt:%s", baseKey)
-	userId := uuid.New().String()
-	err := cs.acquireLock(ctx, attemptKey, userId)
+	checkoutId := uuid.New().String()
+	err := cs.acquireLock(ctx, attemptKey, checkoutId)
 	if err != nil {
 		slog.Info("Can not lock the attempt key", "key", baseKey, "error", err)
-		if errors.Is(err, ErrLockBusy) {
-			return CheckoutResult{EventId: status.OrderProcessing}
+		if errors.Is(err, domain.ErrLockBusy) {
+			return CheckoutResult{EventId: domain.DuplicatedProcessing}
 		}
-		return CheckoutResult{EventId: status.InternalError}
+		return CheckoutResult{EventId: domain.InternalError}
 	}
 	// unlcok the attempt key when the transaction is completed
-	defer cs.releaseLock(context.Background(), attemptKey, userId)
+	defer cs.releaseLock(context.Background(), attemptKey, checkoutId)
 
 	// check if there has been an order at the same address
 	orderKey := fmt.Sprintf("order:%s", baseKey)
 	err = cs.checkOrder(ctx, orderKey)
 	if err != nil {
 		slog.Info("Can not make a duplicated order", "key", baseKey, "error", err)
-		if errors.Is(err, ErrDupOrder) {
-			return CheckoutResult{EventId: status.DuplicatedAddress}
+		if errors.Is(err, domain.ErrDupOrder) {
+			return CheckoutResult{EventId: domain.DuplicatedOrder}
 		}
-		return CheckoutResult{EventId: status.InternalError}
+		return CheckoutResult{EventId: domain.InternalError}
 	}
 
 	// payment processor and async db write
 
 	// write the order key to cache to prevent future orders at the same address
-	cs.writeOrder(ctx, 5, orderKey, userId)
+	cs.writeOrder(ctx, 5, orderKey, checkoutId)
 
 	return CheckoutResult{
-		EventId: status.PurchaseCompleted,
+		EventId: domain.PurchaseCompleted,
 	}
 }
 
 // Create and lock the attempt Key if it is not yet in cache. Returns an error if it is
-func (cs *CheckoutService) acquireLock(ctx context.Context, attemptKey string, userId string) error {
-	acquired, err := cs.RedisClusterClient.SetNX(ctx, attemptKey, userId, 20*time.Second).Result()
+func (cs *CheckoutService) acquireLock(ctx context.Context, attemptKey string, checkoutId string) error {
+	acquired, err := cs.RedisClusterClient.SetNX(ctx, attemptKey, checkoutId, 20*time.Second).Result()
 	if err != nil {
 		return err
 	}
 	if !acquired {
-		return ErrLockBusy
+		return domain.ErrLockBusy
 	}
 	return nil
 }
 
 // Delete the attempt key from cache
-func (cs *CheckoutService) releaseLock(ctx context.Context, attemptKey string, userId string) {
+func (cs *CheckoutService) releaseLock(ctx context.Context, attemptKey string, checkoutId string) {
 	script := `
 		if redis.call("get", KEYS[1]) == ARGV[1] then
 			return redis.call("del", KEYS[1])
@@ -82,7 +79,7 @@ func (cs *CheckoutService) releaseLock(ctx context.Context, attemptKey string, u
 			return 0
 		end
 	`
-	cs.RedisClusterClient.Eval(ctx, script, []string{attemptKey}, userId)
+	cs.RedisClusterClient.Eval(ctx, script, []string{attemptKey}, checkoutId)
 }
 
 // Check if the order key is in cache
@@ -92,17 +89,17 @@ func (cs *CheckoutService) checkOrder(ctx context.Context, orderKey string) erro
 		return err
 	}
 	if exists > 0 {
-		return ErrDupOrder
+		return domain.ErrDupOrder
 	}
 	return nil
 }
 
 // Write the order key to cache
-func (cs *CheckoutService) writeOrder(ctx context.Context, maxAttempts int, orderKey string, userId string) {
+func (cs *CheckoutService) writeOrder(ctx context.Context, maxRetries int, orderKey string, checkoutId string) {
 	written := false
 
-	for i := 0; i < maxAttempts; i++ {
-		err := cs.RedisClusterClient.Set(ctx, orderKey, userId, 2*time.Hour).Err()
+	for i := range maxRetries {
+		err := cs.RedisClusterClient.Set(ctx, orderKey, checkoutId, 2*time.Hour).Err()
 		if err == nil {
 			written = true
 			break

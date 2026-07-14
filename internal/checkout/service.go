@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"github.com/stripe/stripe-go/v86"
+	"github.com/stripe/stripe-go/v86/paymentintent"
 )
 
 type CheckoutService struct {
@@ -21,14 +23,16 @@ type CheckoutResult struct {
 	EventId domain.EventId
 }
 
-func (cs *CheckoutService) ProcessCheckout(ctx context.Context, paymentId string, shippingAddress domain.ShippingAddress) CheckoutResult {
-	// lock the attempt key
+func (cs *CheckoutService) ProcessCheckout(ctx context.Context, checkoutRequest CheckoutRequest) CheckoutResult {
+	shippingAddress := checkoutRequest.ShippingAddress
 	baseKey := shippingAddress.BaseKey()
 	attemptKey := fmt.Sprintf("attempt:%s", baseKey)
 	checkoutId := uuid.New().String()
+
+	// lock the attempt key
 	err := cs.acquireLock(ctx, attemptKey, checkoutId)
 	if err != nil {
-		slog.Info("Can not lock the attempt key", "key", baseKey, "error", err)
+		slog.Info("Can not lock the attempt key", "checkoutId", checkoutId, "error", err)
 		if errors.Is(err, domain.ErrLockBusy) {
 			return CheckoutResult{EventId: domain.DuplicatedProcessing}
 		}
@@ -41,14 +45,31 @@ func (cs *CheckoutService) ProcessCheckout(ctx context.Context, paymentId string
 	orderKey := fmt.Sprintf("order:%s", baseKey)
 	err = cs.checkOrder(ctx, orderKey)
 	if err != nil {
-		slog.Info("Can not make a duplicated order", "key", baseKey, "error", err)
+		slog.Info("Can not make a duplicated order", "checkoutId", checkoutId, "error", err)
 		if errors.Is(err, domain.ErrDupOrder) {
 			return CheckoutResult{EventId: domain.DuplicatedOrder}
 		}
 		return CheckoutResult{EventId: domain.InternalError}
 	}
 
-	// payment processor and async db write
+	// payment processor
+	paymentIntentParams := &stripe.PaymentIntentParams{
+		Amount:        &checkoutRequest.Amount,
+		Currency:      &checkoutRequest.Currency,
+		PaymentMethod: &checkoutRequest.PaymentMethod,
+		Confirm:       stripe.Bool(true),
+		AutomaticPaymentMethods: &stripe.PaymentIntentAutomaticPaymentMethodsParams{
+			Enabled:        stripe.Bool(true),
+			AllowRedirects: stripe.String("never"),
+		},
+	}
+	_, err = paymentintent.New(paymentIntentParams)
+	if err != nil {
+		slog.Info("Payment submitted but was not accepted", "checkoutId", checkoutId, "error", err)
+		return CheckoutResult{EventId: domain.PaymentDecline}
+	}
+
+	// async DB write
 
 	// write the order key to cache to prevent future orders at the same address
 	cs.writeOrder(ctx, 5, orderKey, checkoutId)

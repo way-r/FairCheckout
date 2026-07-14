@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/stripe/stripe-go/v86"
 
 	checkout "FairCheckout/internal/checkout"
 	config "FairCheckout/internal/config"
@@ -20,6 +21,8 @@ func main() {
 	checkoutHandler := &checkout.CheckoutHandler{
 		ChekoutService: *checkoutService,
 	}
+
+	stripe.Key = appConfig.StripeSecretKey
 
 	router := gin.Default()
 	router.POST("/checkout", checkoutHandler.Checkout)

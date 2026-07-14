@@ -11,6 +11,7 @@ import (
 
 type AppConfig struct {
 	RedisClusterAddrs []string
+	StripeSecretKey   string
 }
 
 // Load config from local env file
@@ -33,8 +34,10 @@ func LoadConfigLocal() *AppConfig {
 			"error", err,
 		)
 	}
+	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
 
 	return &AppConfig{
 		RedisClusterAddrs: redisClusterAddrs,
+		StripeSecretKey:   stripeSecretKey,
 	}
 }

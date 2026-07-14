@@ -9,7 +9,10 @@ import (
 )
 
 type CheckoutRequest struct {
-	PaymentId       string                 `json:"payment_id" binding:"required"`
+	Amount        int64  `json:"amount" binding:"required"`
+	Currency      string `json:"currency" binding:"required"`
+	PaymentMethod string `json:"payment_mehtod" binding:"required"`
+
 	ShippingAddress domain.ShippingAddress `json:"shipping_address" binding:"required"`
 }
 
@@ -28,10 +31,8 @@ func (chdl *CheckoutHandler) Checkout(gctx *gin.Context) {
 	}
 
 	ctx := gctx.Request.Context()
-	paymentId := checkoutRequest.PaymentId
-	shippingAddress := checkoutRequest.ShippingAddress
 
-	checkoutResult := chdl.ChekoutService.ProcessCheckout(ctx, paymentId, shippingAddress)
+	checkoutResult := chdl.ChekoutService.ProcessCheckout(ctx, checkoutRequest)
 
 	checkoutStatus := checkoutResult.EventId.StatusCode()
 	gctx.JSON(checkoutStatus, gin.H{

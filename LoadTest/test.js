@@ -15,7 +15,6 @@ const ADDRESS_POOL_SIZE = 100;
 const checkoutUrl = 'http://localhost:8080/checkout'
 
 export default function() {
-    const randomHouseNumber = Math.floor(Math.random() * ADDRESS_POOL_SIZE) + 1;
     const payload = JSON.stringify({
         payment_id: uuidv4(),
         shipping_address: {

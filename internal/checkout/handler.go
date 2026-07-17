@@ -16,14 +16,23 @@ type CheckoutRequest struct {
 	ShippingAddress domain.ShippingAddress `json:"shipping_address" binding:"required"`
 }
 
-type CheckoutHandler struct {
-	ChekoutService CheckoutService
+type Handler struct {
+	svc Service
 }
 
-func (chdl *CheckoutHandler) Checkout(gctx *gin.Context) {
+func NewHandler(svc Service) *Handler {
+	return &Handler{
+		svc: svc,
+	}
+}
+
+func (hdl *Handler) Checkout(gctx *gin.Context) {
 	var checkoutRequest CheckoutRequest
 	if err := gctx.ShouldBindJSON(&checkoutRequest); err != nil {
-		slog.Error("CheckoutRequest cannot be parsed", "error", err)
+		slog.Error(
+			"CheckoutRequest cannot be parsed",
+			"error", err,
+		)
 		gctx.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 		})
@@ -31,11 +40,10 @@ func (chdl *CheckoutHandler) Checkout(gctx *gin.Context) {
 	}
 
 	ctx := gctx.Request.Context()
+	checkoutResponse := hdl.svc.ProcessCheckout(ctx, checkoutRequest)
 
-	checkoutResult := chdl.ChekoutService.ProcessCheckout(ctx, checkoutRequest)
-
-	checkoutStatus := checkoutResult.EventId.StatusCode()
+	checkoutStatus := checkoutResponse.EventID.StatusCode()
 	gctx.JSON(checkoutStatus, gin.H{
-		"order_status": checkoutResult.EventId.String(),
+		"order_status": checkoutResponse.EventID.String(),
 	})
 }

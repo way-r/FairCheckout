@@ -4,22 +4,22 @@ import (
 	"net/http"
 )
 
-type EventId int
+type EventID int
 
 const (
 	// purchase sucessful, no violation
 	PurchaseCompleted = 1000
 	// an order with the same address is being processed
-	DuplicatedProcessing EventId = 1001
+	DuplicatedProcessing EventID = 1001
 	// an order with the same address has been made
-	DuplicatedOrder EventId = 1003
+	DuplicatedOrder EventID = 1003
 	// payment rejected by processor, no violation
-	PaymentDecline EventId = 2001
+	PaymentDecline EventID = 2001
 	// service went wrong
-	InternalError EventId = 3001
+	InternalError EventID = 3001
 )
 
-func (e EventId) String() string {
+func (e EventID) String() string {
 	switch e {
 	case PurchaseCompleted:
 		return "Purchase completed"
@@ -36,7 +36,7 @@ func (e EventId) String() string {
 	}
 }
 
-func (e EventId) StatusCode() int {
+func (e EventID) StatusCode() int {
 	switch e {
 	case PurchaseCompleted:
 		return http.StatusAccepted

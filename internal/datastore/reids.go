@@ -1,7 +1,6 @@
 package datastore
 
 import (
-	config "FairCheckout/internal/config"
 	"context"
 	"log/slog"
 	"os"
@@ -9,9 +8,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func RedisClusterClient(cfg *config.AppConfig) *redis.ClusterClient {
+func RedisClusterClient(addresses []string) *redis.ClusterClient {
 	client := redis.NewClusterClient(&redis.ClusterOptions{
-		Addrs: cfg.RedisClusterAddrs,
+		Addrs: addresses,
 	})
 
 	if err := client.Ping(context.Background()).Err(); err != nil {

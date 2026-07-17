@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	config "FairCheckout/internal/config"
+	datastore "FairCheckout/internal/datastore"
 	domain "FairCheckout/internal/domain"
 
 	"github.com/google/uuid"
@@ -15,44 +17,64 @@ import (
 	"github.com/stripe/stripe-go/v86/paymentintent"
 )
 
-type CheckoutService struct {
-	RedisClusterClient *redis.ClusterClient
+type Service struct {
+	redis               *redis.ClusterClient
+	attemptLockDuration time.Duration
+	orderLockDuration   time.Duration
+	maxRetries          int
 }
 
-type CheckoutResult struct {
-	EventId domain.EventId
+type Result struct {
+	EventID domain.EventID // interpreted by handler
 }
 
-func (cs *CheckoutService) ProcessCheckout(ctx context.Context, checkoutRequest CheckoutRequest) CheckoutResult {
+func NewService(rdsc *config.RedisConfig) *Service {
+	return &Service{
+		redis:               datastore.RedisClusterClient(rdsc.ClusterAddrs),
+		attemptLockDuration: rdsc.AttemptLockDuration,
+		orderLockDuration:   rdsc.OrderLockDuration,
+		maxRetries:          rdsc.OrderCacheWriteMaxRetries,
+	}
+}
+
+func (cs *Service) ProcessCheckout(ctx context.Context, checkoutRequest CheckoutRequest) Result {
 	shippingAddress := checkoutRequest.ShippingAddress
 	baseKey := shippingAddress.BaseKey()
 	attemptKey := fmt.Sprintf("attempt:%s", baseKey)
-	checkoutId := uuid.New().String()
+	checkoutID := uuid.New().String()
 
 	// lock the attempt key
-	err := cs.acquireLock(ctx, attemptKey, checkoutId)
+	err := cs.acquireLock(ctx, attemptKey, checkoutID)
 	if err != nil {
-		slog.Info("Can not lock the attempt key", "checkoutId", checkoutId, "error", err)
+		slog.Info(
+			"Can not lock the attempt key",
+			"checkoutID", checkoutID,
+			"error", err,
+		)
 		if errors.Is(err, domain.ErrLockBusy) {
-			return CheckoutResult{EventId: domain.DuplicatedProcessing}
+			return Result{EventID: domain.DuplicatedProcessing}
 		}
-		return CheckoutResult{EventId: domain.InternalError}
+		return Result{EventID: domain.InternalError}
 	}
 	// unlcok the attempt key when the transaction is completed
-	defer cs.releaseLock(context.Background(), attemptKey, checkoutId)
+	defer cs.releaseLock(context.Background(), attemptKey, checkoutID)
 
 	// check if there has been an order at the same address
 	orderKey := fmt.Sprintf("order:%s", baseKey)
 	err = cs.checkOrder(ctx, orderKey)
 	if err != nil {
-		slog.Info("Can not make a duplicated order", "checkoutId", checkoutId, "error", err)
+		slog.Info(
+			"Can not make a duplicated order",
+			"checkoutID", checkoutID,
+			"error", err,
+		)
 		if errors.Is(err, domain.ErrDupOrder) {
-			return CheckoutResult{EventId: domain.DuplicatedOrder}
+			return Result{EventID: domain.DuplicatedOrder}
 		}
-		return CheckoutResult{EventId: domain.InternalError}
+		return Result{EventID: domain.InternalError}
 	}
 
-	// payment processor
+	// create the payment intent to stripe
 	paymentIntentParams := &stripe.PaymentIntentParams{
 		Amount:        &checkoutRequest.Amount,
 		Currency:      &checkoutRequest.Currency,
@@ -65,23 +87,27 @@ func (cs *CheckoutService) ProcessCheckout(ctx context.Context, checkoutRequest 
 	}
 	_, err = paymentintent.New(paymentIntentParams)
 	if err != nil {
-		slog.Info("Payment submitted but was not accepted", "checkoutId", checkoutId, "error", err)
-		return CheckoutResult{EventId: domain.PaymentDecline}
+		slog.Info(
+			"Payment submitted but was not accepted",
+			"checkoutID", checkoutID,
+			"error", err,
+		)
+		return Result{EventID: domain.PaymentDecline}
 	}
+
+	// write the order key to cache to prevent future orders at the same address
+	cs.writeOrder(ctx, orderKey, checkoutID)
 
 	// async DB write
 
-	// write the order key to cache to prevent future orders at the same address
-	cs.writeOrder(ctx, 5, orderKey, checkoutId)
-
-	return CheckoutResult{
-		EventId: domain.PurchaseCompleted,
+	return Result{
+		EventID: domain.PurchaseCompleted,
 	}
 }
 
 // Create and lock the attempt Key if it is not yet in cache. Returns an error if it is
-func (cs *CheckoutService) acquireLock(ctx context.Context, attemptKey string, checkoutId string) error {
-	acquired, err := cs.RedisClusterClient.SetNX(ctx, attemptKey, checkoutId, 20*time.Second).Result()
+func (cs *Service) acquireLock(ctx context.Context, attemptKey string, checkoutID string) error {
+	acquired, err := cs.redis.SetNX(ctx, attemptKey, checkoutID, cs.attemptLockDuration).Result()
 	if err != nil {
 		return err
 	}
@@ -92,7 +118,7 @@ func (cs *CheckoutService) acquireLock(ctx context.Context, attemptKey string, c
 }
 
 // Delete the attempt key from cache
-func (cs *CheckoutService) releaseLock(ctx context.Context, attemptKey string, checkoutId string) {
+func (cs *Service) releaseLock(ctx context.Context, attemptKey string, checkoutID string) {
 	script := `
 		if redis.call("get", KEYS[1]) == ARGV[1] then
 			return redis.call("del", KEYS[1])
@@ -100,12 +126,12 @@ func (cs *CheckoutService) releaseLock(ctx context.Context, attemptKey string, c
 			return 0
 		end
 	`
-	cs.RedisClusterClient.Eval(ctx, script, []string{attemptKey}, checkoutId)
+	cs.redis.Eval(ctx, script, []string{attemptKey}, checkoutID)
 }
 
 // Check if the order key is in cache
-func (cs *CheckoutService) checkOrder(ctx context.Context, orderKey string) error {
-	exists, err := cs.RedisClusterClient.Exists(ctx, orderKey).Result()
+func (cs *Service) checkOrder(ctx context.Context, orderKey string) error {
+	exists, err := cs.redis.Exists(ctx, orderKey).Result()
 	if err != nil {
 		return err
 	}
@@ -116,20 +142,28 @@ func (cs *CheckoutService) checkOrder(ctx context.Context, orderKey string) erro
 }
 
 // Write the order key to cache
-func (cs *CheckoutService) writeOrder(ctx context.Context, maxRetries int, orderKey string, checkoutId string) {
+func (cs *Service) writeOrder(ctx context.Context, orderKey string, checkoutID string) {
 	written := false
 
-	for i := range maxRetries {
-		err := cs.RedisClusterClient.Set(ctx, orderKey, checkoutId, 2*time.Hour).Err()
+	for i := range cs.maxRetries {
+		err := cs.redis.Set(ctx, orderKey, checkoutID, cs.orderLockDuration).Err()
 		if err == nil {
 			written = true
 			break
 		}
-		slog.Warn("Failed to write orderKey to cache", "key", orderKey, "attempt", i+1, "error", err)
+		slog.Warn(
+			"Failed to write orderKey to cache",
+			"key", orderKey,
+			"attempt", i+1,
+			"error", err,
+		)
 		time.Sleep(200 * time.Millisecond)
 	}
 
 	if !written {
-		slog.Error("Failed to write orderKey to cache after max attempts", "key", orderKey)
+		slog.Error(
+			"Failed to write orderKey to cache after max attempts",
+			"key", orderKey,
+		)
 	}
 }

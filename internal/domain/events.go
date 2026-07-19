@@ -7,16 +7,12 @@ import (
 type EventID int
 
 const (
-	// purchase sucessful, no violation
-	PurchaseCompleted = 1000
-	// an order with the same address is being processed
-	DuplicatedProcessing EventID = 1001
-	// an order with the same address has been made
-	DuplicatedOrder EventID = 1003
-	// payment rejected by processor, no violation
-	PaymentDecline EventID = 2001
-	// service went wrong
-	InternalError EventID = 3001
+	PurchaseCompleted    EventID = 1000 // purchase sucessful, no violation
+	DuplicatedProcessing EventID = 1001 // an order with the same address is being processed
+	DuplicatedOrder      EventID = 1003 // an order with the same address has been made
+	OutOfStock           EventID = 1005 // item requested is out of stock
+	PaymentDecline       EventID = 2001 // payment rejected by processor, no violation
+	InternalError        EventID = 3001 // service went wrong
 )
 
 func (e EventID) String() string {
@@ -27,6 +23,8 @@ func (e EventID) String() string {
 		return "Purchase failed due to another order with duplicated address being processed"
 	case DuplicatedOrder:
 		return "Purchase failed due to another order completed with duplicated address"
+	case OutOfStock:
+		return "Purchase failed due to item being out of stock"
 	case PaymentDecline:
 		return "Purchase failed due to payment processor declining the payment"
 	case InternalError:
@@ -43,6 +41,8 @@ func (e EventID) StatusCode() int {
 	case DuplicatedProcessing:
 		return http.StatusTooManyRequests
 	case DuplicatedOrder:
+		return http.StatusConflict
+	case OutOfStock:
 		return http.StatusConflict
 	case PaymentDecline:
 		return http.StatusPaymentRequired

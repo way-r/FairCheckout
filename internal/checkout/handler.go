@@ -2,6 +2,7 @@ package checkout
 
 import (
 	domain "FairCheckout/internal/domain"
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -9,6 +10,8 @@ import (
 )
 
 type CheckoutRequest struct {
+	ProductID     string `json:"product_id" binding:"required"`
+	Quantity      int    `json:"quantity" binding:"required"`
 	Amount        int64  `json:"amount" binding:"required"`
 	Currency      string `json:"currency" binding:"required"`
 	PaymentMethod string `json:"payment_mehtod" binding:"required"`
@@ -16,17 +19,21 @@ type CheckoutRequest struct {
 	ShippingAddress domain.ShippingAddress `json:"shipping_address" binding:"required"`
 }
 
-type Handler struct {
-	svc Service
+type Processor interface {
+	ProcessCheckout(ctx context.Context, cr CheckoutRequest) Result
 }
 
-func NewHandler(svc Service) *Handler {
+type Handler struct {
+	service Processor
+}
+
+func NewHandler(s Processor) *Handler {
 	return &Handler{
-		svc: svc,
+		service: s,
 	}
 }
 
-func (hdl *Handler) Checkout(gctx *gin.Context) {
+func (h *Handler) Checkout(gctx *gin.Context) {
 	var checkoutRequest CheckoutRequest
 	if err := gctx.ShouldBindJSON(&checkoutRequest); err != nil {
 		slog.Error(
@@ -40,7 +47,7 @@ func (hdl *Handler) Checkout(gctx *gin.Context) {
 	}
 
 	ctx := gctx.Request.Context()
-	checkoutResponse := hdl.svc.ProcessCheckout(ctx, checkoutRequest)
+	checkoutResponse := h.service.ProcessCheckout(ctx, checkoutRequest)
 
 	checkoutStatus := checkoutResponse.EventID.StatusCode()
 	gctx.JSON(checkoutStatus, gin.H{

@@ -1,6 +1,6 @@
 services:
-  redis-cluster:
-    container_name: redis-cluster
+  checkout-cache-cluster:
+    container_name: checkout-cache-cluster
     image: grokzen/redis-cluster:6.2.14
     ports:
     - "6000:6000"
@@ -12,3 +12,9 @@ services:
     environment:
       - IP=0.0.0.0
       - INITIAL_PORT=6000
+
+  inventory-cache:
+    container_name: inventory-cache
+    image: redis:6-alpine
+    ports:
+    - "6379:6379"

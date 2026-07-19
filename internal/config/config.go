@@ -11,11 +11,15 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type RedisConfig struct {
-	ClusterAddrs              []string
-	AttemptLockDuration       time.Duration
-	OrderLockDuration         time.Duration
-	OrderCacheWriteMaxRetries int
+type CheckoutConfig struct {
+	ClusterAddrs    []string
+	AttemptDuration time.Duration
+	OrderDuration   time.Duration
+	MaxRetries      int
+}
+
+type InventoryConfig struct {
+	Addr string
 }
 
 type StripeConfig struct {
@@ -23,8 +27,9 @@ type StripeConfig struct {
 }
 
 type AppConfig struct {
-	Redis  RedisConfig
-	Stripe StripeConfig
+	Checkout  CheckoutConfig
+	Inventory InventoryConfig
+	Stripe    StripeConfig
 }
 
 // Load config from local env file
@@ -39,46 +44,57 @@ func LoadConfigLocal() AppConfig {
 		os.Exit(1)
 	}
 
-	redisClusterAddrsStr := os.Getenv("REDIS_NODES")
-	redisClusterAddrs := strings.Split(redisClusterAddrsStr, ",")
-	if len(redisClusterAddrs) == 0 {
-		slog.Error("Error reading value for 'REDIS_NODES'")
+	// checkout cache
+	checkoutClusterAddrsStr := os.Getenv("CHECKOUT_ADDRS")
+	checkoutClusterAddrs := strings.Split(checkoutClusterAddrsStr, ",")
+	if len(checkoutClusterAddrs) == 0 {
+		slog.Error(
+			"Invalid checkoutClusterAddrsStr",
+			"checkoutClusterAddrsStr", checkoutClusterAddrsStr,
+		)
+		os.Exit(1)
 	}
-	attemptLockDurationStr := os.Getenv("ATTEMPT_LOCK_DURATION")
-	attemptLockDuration, err := time.ParseDuration(attemptLockDurationStr)
+	checkoutAttemptDurationStr := os.Getenv("ATTEMPT_DURATION")
+	checkoutAttemptDuration, err := time.ParseDuration(checkoutAttemptDurationStr)
 	if err != nil {
 		slog.Warn(
-			"Invalid attemptLockDurationStr, defaulting to 20s",
-			"attemptLockDurationStr", attemptLockDurationStr,
+			"Invalid checkoutAttemptDurationStr, defaulting to 20s",
+			"checkoutAttemptDurationStr", checkoutAttemptDurationStr,
 		)
-		attemptLockDuration = 20 * time.Second
+		checkoutAttemptDuration = 20 * time.Second
 	}
-	orderLockDurationStr := os.Getenv("ORDER_LOCK_DURATION")
-	orderLockDuration, err := time.ParseDuration(orderLockDurationStr)
+	checkoutOrderDurationStr := os.Getenv("ORDER_DURATION")
+	checkoutOrderDuration, err := time.ParseDuration(checkoutOrderDurationStr)
 	if err != nil {
 		slog.Warn(
-			"Invalid orderLockDurationStr, defaulting to 4h",
-			"orderLockDurationStr", orderLockDurationStr,
+			"Invalid checkoutOrderDurationStr, defaulting to 4h",
+			"checkoutOrderDurationStr", checkoutOrderDurationStr,
 		)
-		orderLockDuration = 4 * time.Hour
+		checkoutOrderDuration = 4 * time.Hour
 	}
-	orderCacheWriteMaxRetriesStr := os.Getenv("ORDER_CACHE_WRITE_MAX_RETRIES")
-	orderCacheWriteMaxRetries, err := strconv.Atoi(orderCacheWriteMaxRetriesStr)
+	checkoutMaxRetriesStr := os.Getenv("MAX_RETRIES")
+	checkoutMaxRetries, err := strconv.Atoi(checkoutMaxRetriesStr)
 	if err != nil {
 		slog.Warn(
-			"Invalid orderCacheWriteMaxRetriesStr, defaulting to 5",
-			"orderCacheWriteMaxRetriesStr", orderCacheWriteMaxRetriesStr,
+			"Invalid checkoutMaxRetriesStr, defaulting to 5",
+			"checkoutMaxRetriesStr", checkoutMaxRetriesStr,
 		)
-		orderCacheWriteMaxRetries = 5
+		checkoutMaxRetries = 5
+	}
+	checkout := CheckoutConfig{
+		ClusterAddrs:    checkoutClusterAddrs,
+		AttemptDuration: checkoutAttemptDuration,
+		OrderDuration:   checkoutOrderDuration,
+		MaxRetries:      checkoutMaxRetries,
 	}
 
-	redis := RedisConfig{
-		ClusterAddrs:              redisClusterAddrs,
-		AttemptLockDuration:       attemptLockDuration,
-		OrderLockDuration:         orderLockDuration,
-		OrderCacheWriteMaxRetries: orderCacheWriteMaxRetries,
+	// inventory cache
+	inventoryAddr := os.Getenv("INVENTORY_ADDR")
+	inventory := InventoryConfig{
+		Addr: inventoryAddr,
 	}
 
+	// payment
 	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
 	if stripeSecretKey == "" {
 		slog.Error("Error reading value for 'STRIPE_SECRET_KEY'")
@@ -88,7 +104,8 @@ func LoadConfigLocal() AppConfig {
 	}
 
 	return AppConfig{
-		Redis:  redis,
-		Stripe: stripe,
+		Checkout:  checkout,
+		Inventory: inventory,
+		Stripe:    stripe,
 	}
 }

@@ -9,7 +9,6 @@ import (
 
 	domain "FairCheckout/internal/domain"
 
-	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v86"
 	"github.com/stripe/stripe-go/v86/paymentintent"
 )
@@ -42,11 +41,13 @@ type Result struct {
 }
 
 func (s *Service) ProcessCheckout(ctx context.Context, cr CheckoutRequest) Result {
+	ProductID := cr.ProductID
+	checkoutID := cr.CheckoutID
 	shippingAddress := cr.ShippingAddress
+
+	productKey := fmt.Sprintf("item:%s", ProductID)
 	addresskey := shippingAddress.BaseKey()
-	attemptKey := fmt.Sprintf("attempt:%s", addresskey)
-	productKey := fmt.Sprintf("item:%s", cr.ProductID)
-	checkoutID := uuid.New().String()
+	attemptKey := fmt.Sprintf("attempt:%s_%s", addresskey, productKey)
 	orderSuccessful := false
 
 	// lock the attempt key
@@ -108,17 +109,19 @@ func (s *Service) ProcessCheckout(ctx context.Context, cr CheckoutRequest) Resul
 	}()
 
 	// create and send the paymentintent to Stripe
-	paymentIntentParams := &stripe.PaymentIntentParams{
+	params := &stripe.PaymentIntentParams{
 		Amount:        &cr.Amount,
 		Currency:      &cr.Currency,
 		PaymentMethod: &cr.PaymentMethod,
 		Confirm:       stripe.Bool(true),
+		CaptureMethod: stripe.String("manual"),
 		AutomaticPaymentMethods: &stripe.PaymentIntentAutomaticPaymentMethodsParams{
 			Enabled:        stripe.Bool(true),
 			AllowRedirects: stripe.String("never"),
 		},
 	}
-	_, err = paymentintent.New(paymentIntentParams)
+	params.SetIdempotencyKey(checkoutID)
+	_, err = paymentintent.New(params)
 	if err != nil {
 		slog.Info(
 			"Payment submitted but was not accepted",

@@ -15,6 +15,7 @@ type CheckoutRequest struct {
 	Amount        int64  `json:"amount" binding:"required"`
 	Currency      string `json:"currency" binding:"required"`
 	PaymentMethod string `json:"payment_mehtod" binding:"required"`
+	CheckoutID    string `json:"checkout_id" binding:"required"`
 
 	ShippingAddress domain.ShippingAddress `json:"shipping_address" binding:"required"`
 }
